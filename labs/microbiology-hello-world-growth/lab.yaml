@@ -1,0 +1,26 @@
+schema_version: "2.0"
+title: "Microbiology Hello World Growth Lab"
+description: "Single-model tutorial lab showing how cells consume food, multiply, and slow down as limits appear."
+models:
+  - alias: microbial_growth
+    path: model
+runtime:
+  duration: 12
+  communication_step: 0.25
+  initial_inputs: {}
+io:
+  inputs:
+    - name: initial_cells
+      maps_to: microbial_growth.initial_cells
+    - name: available_food
+      maps_to: microbial_growth.available_food
+    - name: growth_rate
+      maps_to: microbial_growth.growth_rate
+    - name: space_limit
+      maps_to: microbial_growth.space_limit
+  outputs:
+    - name: colony_state
+      maps_to: microbial_growth.colony_state
+    - name: lesson_summary
+      maps_to: microbial_growth.lesson_summary
+wiring: []

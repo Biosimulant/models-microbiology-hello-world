@@ -1,0 +1,55 @@
+schema_version: "2.0"
+title: "Microbiology Hello World Growth"
+description: "Beginner-friendly microbial growth model where cells consume food and slow down near resource or space limits."
+standard: other
+tags:
+  - microbiology
+  - tutorial
+  - hello-world
+  - population-growth
+authors:
+  - "Biosimulant Team"
+biosim:
+  entrypoint: "src.microbial_growth:MicrobialGrowthHelloWorld"
+  communication_step: 0.25
+parameters:
+  - name: initial_cells
+    value: 10.0
+    min: 0.0
+    units: "cells"
+    description: "Starting number of cells."
+  - name: available_food
+    value: 80.0
+    min: 0.0
+    units: "food_unit"
+    description: "Food units available at the start of the run."
+  - name: growth_rate
+    value: 0.8
+    min: 0.0
+    units: "1/hour"
+    description: "Maximum fractional growth rate when food and space are available."
+  - name: space_limit
+    value: 200.0
+    min: 1.0
+    units: "cells"
+    description: "Approximate maximum cell count the environment can hold."
+io:
+  inputs:
+    - name: initial_cells
+      accepted_units: ["cells"]
+      description: "Override the starting number of cells before the first step."
+    - name: available_food
+      accepted_units: ["food_unit"]
+      description: "Override available food before the first step."
+    - name: growth_rate
+      accepted_units: ["1/hour"]
+      description: "Override maximum growth rate."
+    - name: space_limit
+      accepted_units: ["cells"]
+      description: "Override the space limit."
+  outputs:
+    - name: colony_state
+      emitted_unit: "cells"
+      description: "Current colony size, food remaining, and limiting phase."
+    - name: lesson_summary
+      description: "Plain-language summary of the run."

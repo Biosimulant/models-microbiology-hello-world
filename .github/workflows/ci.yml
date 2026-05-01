@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  validate:
+    runs-on: ubuntu-latest
+    needs: [secret-scan]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install validation dependencies
+        run: |
+          pip install pyyaml pytest
+          pip install "biosim @ git+https://github.com/BioSimulant/biosim.git@main"
+      - name: Check public/internal boundary
+        run: bash scripts/check_public_boundary.sh
+      - name: Validate manifests
+        run: python3 scripts/validate_manifests.py
+      - name: Check entrypoints
+        run: python3 scripts/check_entrypoints.py
+      - name: Run tests
+        run: python3 -m pytest -q labs/microbiology-hello-world-growth/model/tests
+      - name: Run example
+        run: |
+          python3 examples/run_example.py microbial-growth
+          python3 examples/run_example.py microbial-growth --json
