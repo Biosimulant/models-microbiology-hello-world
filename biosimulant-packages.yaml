@@ -1,0 +1,10 @@
+schema_version: "1"
+namespace: biosimulant
+default_visibility: public
+packages:
+  - id: microbiology-hello-world-growth-lab
+    package: biosimulant/microbiology-hello-world-growth
+    version: 1.0.0
+    type: lab
+    path: labs/microbiology-hello-world-growth
+    visibility: public
