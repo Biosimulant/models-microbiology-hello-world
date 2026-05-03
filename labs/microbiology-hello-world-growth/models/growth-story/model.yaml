@@ -1,0 +1,35 @@
+schema_version: "2.0"
+title: "Growth Story Reporter"
+description: "Combines setup and growth results into a plain-language hello-world story."
+standard: other
+tags:
+  - microbiology
+  - tutorial
+  - hello-world
+  - explanation
+authors:
+  - "Biosimulant Team"
+biosim:
+  entrypoint: "src.growth_story:GrowthStoryReporter"
+  communication_step: 0.25
+parameters:
+  - name: integration_step
+    value: 0.25
+    min: 0.0
+    units: "hour"
+    description: "BioWorld pacing step for the story reporter."
+io:
+  inputs:
+    - name: growth_setup
+      description: "Setup record from the starter-culture model."
+    - name: colony_state
+      description: "Colony state record from the growth model, including viable cells, food remaining, peak cells, and starvation loss."
+    - name: lesson_summary
+      description: "Plain-language summary from the growth model."
+  outputs:
+    - name: hello_world_story
+      description: "Beginner-friendly story explaining the run."
+    - name: next_steps
+      description: "Simple suggestions for changing the next run."
+    - name: run_metadata
+      description: "Record with story reporter status."

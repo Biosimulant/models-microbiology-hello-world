@@ -1,0 +1,26 @@
+{
+  "edges": [],
+  "nodes": [
+    {
+      "id": "starter_setup",
+      "position": {
+        "x": 360,
+        "y": 0
+      }
+    },
+    {
+      "id": "microbial_growth",
+      "position": {
+        "x": 740,
+        "y": 205.57541647553887
+      }
+    },
+    {
+      "id": "story_reporter",
+      "position": {
+        "x": 1058.2474999620388,
+        "y": -38.9557397034841
+      }
+    }
+  ]
+}

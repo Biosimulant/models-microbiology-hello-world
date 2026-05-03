@@ -1,6 +1,6 @@
 schema_version: "2.0"
-title: "Microbiology Hello World Growth"
-description: "Beginner-friendly microbial growth model where cells consume food and slow down near resource or space limits."
+title: "Microbiology Hello World Growth Simulator"
+description: "Beginner-friendly microbial growth model that consumes a setup record, simulates viable cells eating food, growing, and declining after starvation."
 standard: other
 tags:
   - microbiology
@@ -33,23 +33,28 @@ parameters:
     min: 1.0
     units: "cells"
     description: "Approximate maximum cell count the environment can hold."
+  - name: integration_step
+    value: 0.05
+    min: 0.0
+    units: "hour"
+    description: "Internal simulation step used while advancing the colony."
+  - name: food_per_new_cell
+    value: 1.0
+    min: 0.0
+    units: "food_unit/cell"
+    description: "Food consumed for each new cell added by the growth step."
+  - name: starvation_death_rate
+    value: 0.04
+    min: 0.0
+    units: "1/hour"
+    description: "First-order viable-cell loss rate after food is exhausted."
 io:
   inputs:
-    - name: initial_cells
-      accepted_units: ["cells"]
-      description: "Override the starting number of cells before the first step."
-    - name: available_food
-      accepted_units: ["food_unit"]
-      description: "Override available food before the first step."
-    - name: growth_rate
-      accepted_units: ["1/hour"]
-      description: "Override maximum growth rate."
-    - name: space_limit
-      accepted_units: ["cells"]
-      description: "Override the space limit."
+    - name: growth_setup
+      description: "Record from the starter-culture model with initial_cells, available_food, growth_rate, space_limit, and food_per_new_cell."
   outputs:
     - name: colony_state
       emitted_unit: "cells"
-      description: "Current colony size, food remaining, and limiting phase."
+      description: "Current viable colony size, food remaining, starvation loss, and limiting phase."
     - name: lesson_summary
       description: "Plain-language summary of the run."

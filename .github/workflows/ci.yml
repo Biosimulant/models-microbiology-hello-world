@@ -41,7 +41,7 @@ jobs:
       - name: Check entrypoints
         run: python3 scripts/check_entrypoints.py
       - name: Run tests
-        run: python3 -m pytest -q labs/microbiology-hello-world-growth/model/tests
+        run: python3 -m pytest -q labs/microbiology-hello-world-growth
       - name: Run example
         run: |
           python3 examples/run_example.py microbial-growth

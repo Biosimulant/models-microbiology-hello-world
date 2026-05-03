@@ -1,11 +1,10 @@
 example_name: "microbial-growth"
 runtime:
   hours: 12.0
-model:
-  path: "../../labs/microbiology-hello-world-growth/model"
-  class: "src.microbial_growth:MicrobialGrowthHelloWorld"
-  parameters:
-    initial_cells: 10.0
-    available_food: 80.0
-    growth_rate: 0.8
-    space_limit: 200.0
+lab:
+  path: "../../labs/microbiology-hello-world-growth"
+inputs:
+  initial_cells: 10.0
+  available_food: 80.0
+  growth_rate: 0.8
+  space_limit: 200.0

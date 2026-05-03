@@ -1,26 +1,60 @@
-schema_version: "2.0"
-title: "Microbiology Hello World Growth Lab"
-description: "Single-model tutorial lab showing how cells consume food, multiply, and slow down as limits appear."
-models:
-  - alias: microbial_growth
-    path: model
-runtime:
-  duration: 12
-  communication_step: 0.25
-  initial_inputs: {}
+description: Beginner-friendly multi-model tutorial lab where users choose a starting plate, watch viable cells grow, and read why starvation changes the curve.
 io:
   inputs:
-    - name: initial_cells
-      maps_to: microbial_growth.initial_cells
-    - name: available_food
-      maps_to: microbial_growth.available_food
-    - name: growth_rate
-      maps_to: microbial_growth.growth_rate
-    - name: space_limit
-      maps_to: microbial_growth.space_limit
+  - maps_to: starter_setup.initial_cells
+    name: initial_cells
+  - maps_to: starter_setup.available_food
+    name: available_food
+  - maps_to: starter_setup.growth_rate
+    name: growth_rate
+  - maps_to: starter_setup.space_limit
+    name: space_limit
   outputs:
-    - name: colony_state
-      maps_to: microbial_growth.colony_state
-    - name: lesson_summary
-      maps_to: microbial_growth.lesson_summary
-wiring: []
+  - maps_to: microbial_growth.colony_state
+    name: colony_state
+  - maps_to: microbial_growth.lesson_summary
+    name: lesson_summary
+  - maps_to: story_reporter.hello_world_story
+    name: hello_world_story
+  - maps_to: story_reporter.next_steps
+    name: next_steps
+models:
+- alias: starter_setup
+  parameters:
+    available_food: 80
+    growth_rate: 0.8
+    initial_cells: 10
+    integration_step: 0.25
+    space_limit: 200
+  path: models/starter-culture
+- alias: microbial_growth
+  parameters:
+    available_food: 80
+    food_per_new_cell: 1
+    growth_rate: 0.8
+    initial_cells: 10
+    integration_step: 0.05
+    space_limit: 200
+    starvation_death_rate: 0.04
+  path: models/microbial-growth
+- alias: story_reporter
+  parameters:
+    integration_step: 0.25
+  path: models/growth-story
+runtime:
+  communication_step: 0.25
+  duration: 12
+  initial_inputs: {}
+schema_version: '2.0'
+title: Microbiology Hello World Growth Lab
+wiring:
+- from: starter_setup.growth_setup
+  to:
+  - microbial_growth.growth_setup
+  - story_reporter.growth_setup
+- from: microbial_growth.colony_state
+  to:
+  - story_reporter.colony_state
+- from: microbial_growth.lesson_summary
+  to:
+  - story_reporter.lesson_summary

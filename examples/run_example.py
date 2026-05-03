@@ -18,19 +18,31 @@ def _load_biosim_repo_paths(root: Path) -> None:
 
 
 def _load_yaml_file(path: Path) -> dict[str, Any]:
-    scripts_dir = path.resolve().parents[2] / "scripts"
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
+    for parent in [path.resolve().parent, *path.resolve().parents]:
+        scripts_dir = parent / "scripts"
+        if (scripts_dir / "simple_yaml.py").is_file():
+            if str(scripts_dir) not in sys.path:
+                sys.path.insert(0, str(scripts_dir))
+            break
     from simple_yaml import load_yaml_file
 
-    return load_yaml_file(path)
-
-
-def _load_config(config_path: Path) -> dict[str, Any]:
-    loaded = _load_yaml_file(config_path)
+    loaded = load_yaml_file(path)
     if not isinstance(loaded, dict):
-        raise ValueError(f"expected mapping config in {config_path}")
+        raise ValueError(f"expected mapping config in {path}")
     return loaded
+
+
+def _split_entrypoint(entrypoint: str) -> tuple[str, str]:
+    if ":" in entrypoint:
+        return tuple(entrypoint.split(":", 1))  # type: ignore[return-value]
+    return tuple(entrypoint.rsplit(".", 1))  # type: ignore[return-value]
+
+
+def _import_entrypoint(model_dir: Path, entrypoint: str) -> type:
+    if str(model_dir) not in sys.path:
+        sys.path.insert(0, str(model_dir))
+    module_name, class_name = _split_entrypoint(entrypoint)
+    return getattr(importlib.import_module(module_name), class_name)
 
 
 def _signal_to_dict(signal: Any) -> dict[str, Any]:
@@ -59,32 +71,106 @@ def _select_timeline_points(history: list[dict[str, Any]], count: int = 7) -> li
     return [history[index] for index in indexes]
 
 
+def _load_lab_world(lab_dir: Path, *, input_overrides: dict[str, float], hours: float | None = None):
+    from biosim import BioWorld
+    from biosim.signals import ScalarSignal, SignalSpec
+    from biosim.wiring import WiringBuilder
+
+    lab = _load_yaml_file(lab_dir / "lab.yaml")
+    runtime = lab.get("runtime") if isinstance(lab.get("runtime"), dict) else {}
+    communication_step = float(runtime.get("communication_step", 0.25))
+    duration = float(hours if hours is not None else runtime.get("duration", 12.0))
+
+    world = BioWorld(communication_step=communication_step)
+    builder = WiringBuilder(world)
+    modules: dict[str, Any] = {}
+
+    for model_entry in lab.get("models", []) or []:
+        alias = str(model_entry["alias"])
+        model_dir = (lab_dir / model_entry["path"]).resolve()
+        manifest = _load_yaml_file(model_dir / "model.yaml")
+        biosim = manifest.get("biosim") if isinstance(manifest.get("biosim"), dict) else {}
+        model_cls = _import_entrypoint(model_dir, str(biosim["entrypoint"]))
+        module = model_cls(**dict(model_entry.get("parameters") or {}))
+        builder.add(alias, module)
+        modules[alias] = module
+
+    for wire in lab.get("wiring", []) or []:
+        builder.connect(str(wire["from"]), [str(target) for target in wire.get("to", [])])
+
+    builder.apply()
+    world.setup({})
+
+    signals_by_alias: dict[str, dict[str, Any]] = {}
+    scalar_spec = SignalSpec.scalar(dtype="float64")
+    io_block = lab.get("io") if isinstance(lab.get("io"), dict) else {}
+    for item in io_block.get("inputs", []) or []:
+        public_name = item.get("name") if isinstance(item, dict) else None
+        maps_to = item.get("maps_to") if isinstance(item, dict) else None
+        if public_name not in input_overrides or not isinstance(maps_to, str):
+            continue
+        alias, port = maps_to.split(".", 1)
+        signals_by_alias.setdefault(alias, {})[port] = ScalarSignal(
+            "example",
+            port,
+            float(input_overrides[public_name]),
+            0.0,
+            spec=scalar_spec,
+        )
+
+    for alias, signals in signals_by_alias.items():
+        modules[alias].set_inputs(signals)
+
+    return world, modules, duration
+
+
+def _refresh_final_story(modules: dict[str, Any], duration: float) -> None:
+    try:
+        setup_outputs = modules["starter_setup"].get_outputs()
+        growth_outputs = modules["microbial_growth"].get_outputs()
+        story_reporter = modules["story_reporter"]
+    except KeyError:
+        return
+
+    final_inputs = {
+        "growth_setup": setup_outputs.get("growth_setup"),
+        "colony_state": growth_outputs.get("colony_state"),
+        "lesson_summary": growth_outputs.get("lesson_summary"),
+    }
+    final_inputs = {name: signal for name, signal in final_inputs.items() if signal is not None}
+    if not final_inputs:
+        return
+    story_reporter.set_inputs(final_inputs)
+    story_reporter.advance_window(start=duration, end=duration, inputs=final_inputs)
+
+
 def _print_human(payload: dict[str, Any]) -> None:
-    parameters = payload["parameters"]
+    setup = payload["outputs"]["starter_setup"]["growth_setup"]["value"]
+    colony = payload["outputs"]["microbial_growth"]["colony_state"]["value"]
+    lesson = payload["outputs"]["microbial_growth"]["lesson_summary"]["value"]
+    story = payload["outputs"]["story_reporter"]["hello_world_story"]["value"]
+    next_steps = payload["outputs"]["story_reporter"]["next_steps"]["value"]
     history = payload["history"]
-    outputs = payload["outputs"]
-    colony = outputs["colony_state"]["value"]
-    lesson = outputs["lesson_summary"]["value"]
-    max_cells = max(parameters["space_limit"], max(point["cells"] for point in history))
+    max_cells = max(setup["space_limit"], max(point["cells"] for point in history))
 
     print("Biosimulant microbiology hello world")
     print("=" * 40)
-    print("Story: cells eat food, make more cells, then slow down when food or space runs low.")
+    print("Story: choose a starting plate, watch viable cells grow, then read what happened.")
     print(
         "Setup: "
-        f"{parameters['initial_cells']:.1f} cells, "
-        f"{parameters['available_food']:.1f} food units, "
-        f"{parameters['growth_rate']:.2f}/hour growth, "
-        f"{parameters['space_limit']:.1f} cell space limit"
+        f"{setup['initial_cells']:.1f} cells, "
+        f"{setup['available_food']:.1f} food units, "
+        f"{setup['growth_rate']:.2f}/hour growth, "
+        f"{setup['space_limit']:.1f} cell space limit"
     )
     print("")
     print("Timeline")
-    print("hour     cells  food left  colony")
+    print("hour  viable cells  food left  colony")
     for point in _select_timeline_points(history):
         bar = _ascii_bar(float(point["cells"]), max_cells)
         print(
             f"{float(point['t']):>4.1f}  "
-            f"{float(point['cells']):>8.1f}  "
+            f"{float(point['cells']):>12.1f}  "
             f"{float(point['food_remaining']):>9.1f}  "
             f"[{bar}]"
         )
@@ -92,9 +178,15 @@ def _print_human(payload: dict[str, Any]) -> None:
     print("Result")
     print(f"- {lesson['headline']}")
     print(f"- {lesson['takeaway']}")
+    print(f"- {story['why_it_matters']}")
     print(f"- Main limit: {colony['limiting_factor']}")
-    print(f"- Food used: {colony['food_used']:.1f} of {parameters['available_food']:.1f} units")
+    print(f"- Food used: {colony['food_used']:.1f} of {setup['available_food']:.1f} units")
     print(f"- Space used: {colony['space_used_percent']:.1f}%")
+    print("")
+    print("Try next")
+    print(f"- {next_steps['headline']}")
+    for suggestion in next_steps["suggestions"]:
+        print(f"- {suggestion}")
 
 
 def main() -> int:
@@ -120,44 +212,43 @@ def main() -> int:
     args = parser.parse_args()
 
     config_path = args.config.resolve() if args.config else (root / args.example / "config.yaml")
-    config = _load_config(config_path)
-    model_cfg = config["model"]
-    model_path = model_cfg.get("path")
-    if not isinstance(model_path, str) or not model_path.strip():
-        raise ValueError("model.path is required")
-    model_root = (config_path.parent / Path(model_path)).resolve()
-    if str(model_root) not in sys.path:
-        sys.path.insert(0, str(model_root))
+    config = _load_yaml_file(config_path)
+    lab_cfg = config.get("lab") if isinstance(config.get("lab"), dict) else {}
+    lab_path = lab_cfg.get("path")
+    if not isinstance(lab_path, str) or not lab_path.strip():
+        raise ValueError("lab.path is required")
+    lab_dir = (config_path.parent / Path(lab_path)).resolve()
 
-    module_name, class_name = model_cfg["class"].split(":", 1)
-    module_cls = getattr(importlib.import_module(module_name), class_name)
-
-    parameters = dict(model_cfg.get("parameters") or {})
+    input_overrides = dict(config.get("inputs") or {})
     if args.initial_cells is not None:
-        parameters["initial_cells"] = args.initial_cells
+        input_overrides["initial_cells"] = args.initial_cells
     if args.food is not None:
-        parameters["available_food"] = args.food
+        input_overrides["available_food"] = args.food
     if args.growth_rate is not None:
-        parameters["growth_rate"] = args.growth_rate
+        input_overrides["growth_rate"] = args.growth_rate
     if args.space_limit is not None:
-        parameters["space_limit"] = args.space_limit
+        input_overrides["space_limit"] = args.space_limit
 
     runtime = config.get("runtime") if isinstance(config.get("runtime"), dict) else {}
     hours = float(args.hours if args.hours is not None else runtime.get("hours", 12.0))
 
-    module = module_cls(**parameters)
-    module.advance_window(0.0, hours)
+    world, modules, duration = _load_lab_world(lab_dir, input_overrides=input_overrides, hours=hours)
+    world.run(duration=duration)
+    _refresh_final_story(modules, duration)
 
-    outputs = {name: _signal_to_dict(signal) for name, signal in module.get_outputs().items()}
-    visuals = module.visualize() or []
+    outputs = {
+        alias: {name: _signal_to_dict(signal) for name, signal in module.get_outputs().items()}
+        for alias, module in modules.items()
+    }
     payload = {
         "example": config.get("example_name", args.example),
         "config_path": str(config_path),
-        "duration_hours": hours,
-        "parameters": parameters,
+        "lab": str(lab_dir),
+        "duration_hours": duration,
+        "inputs": input_overrides,
         "outputs": outputs,
-        "history": module.history,
-        "visuals": visuals,
+        "history": modules["microbial_growth"].history,
+        "visuals": world.collect_visuals(),
     }
 
     if args.output_json is not None:

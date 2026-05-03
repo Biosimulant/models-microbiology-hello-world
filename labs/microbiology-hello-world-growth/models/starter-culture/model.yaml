@@ -1,0 +1,61 @@
+schema_version: "2.0"
+title: "Starter Culture Setup"
+description: "Turns four beginner-friendly controls into a structured microbial growth setup."
+standard: other
+tags:
+  - microbiology
+  - tutorial
+  - hello-world
+  - setup
+authors:
+  - "Biosimulant Team"
+biosim:
+  entrypoint: "src.starter_culture:StarterCultureSetup"
+  communication_step: 0.25
+parameters:
+  - name: initial_cells
+    value: 10.0
+    min: 0.0
+    units: "cells"
+    description: "Default starting number of cells."
+  - name: available_food
+    value: 80.0
+    min: 0.0
+    units: "food_unit"
+    description: "Default food units available at the start."
+  - name: growth_rate
+    value: 0.8
+    min: 0.0
+    units: "1/hour"
+    description: "Default maximum fractional growth rate."
+  - name: space_limit
+    value: 200.0
+    min: 1.0
+    units: "cells"
+    description: "Default maximum colony size the space can hold."
+  - name: integration_step
+    value: 0.25
+    min: 0.0
+    units: "hour"
+    description: "BioWorld pacing step for the setup model."
+io:
+  inputs:
+    - name: initial_cells
+      accepted_units: ["cells"]
+      description: "Starting number of cells."
+    - name: available_food
+      accepted_units: ["food_unit"]
+      description: "Food units available at the start."
+    - name: growth_rate
+      accepted_units: ["1/hour"]
+      description: "How quickly cells can multiply."
+    - name: space_limit
+      accepted_units: ["cells"]
+      description: "Approximate maximum colony size."
+  outputs:
+    - name: growth_setup
+      description: "Record with initial cells, food, growth rate, space limit, and setup label."
+    - name: setup_summary
+      description: "Plain-language summary of the chosen starting plate."
+    - name: run_metadata
+      description: "Record with setup status."

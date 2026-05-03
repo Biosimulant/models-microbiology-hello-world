@@ -1,0 +1,9 @@
+{
+  "schema_version": "1",
+  "local_id": "f7fc6379-e293-4618-a186-a438a336677a",
+  "kind": "lab",
+  "source": "local",
+  "hub_id": "4c7ac16f-3c6a-44e7-9608-6a8d359e6dab",
+  "created_at": "2026-05-03 10:41:53",
+  "package_name": "biosimulant/microbiology-hello-world-growth"
+}

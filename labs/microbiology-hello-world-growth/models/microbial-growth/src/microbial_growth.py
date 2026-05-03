@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from biosim import BioModule
@@ -32,6 +33,7 @@ class MicrobialGrowthHelloWorld(BioModule):
         space_limit: float = 200.0,
         integration_step: float = 0.05,
         food_per_new_cell: float = 1.0,
+        starvation_death_rate: float = 0.04,
     ) -> None:
         for name, value in {
             "initial_cells": initial_cells,
@@ -46,6 +48,8 @@ class MicrobialGrowthHelloWorld(BioModule):
             raise ValueError("integration_step must be positive")
         if food_per_new_cell <= 0:
             raise ValueError("food_per_new_cell must be positive")
+        if starvation_death_rate < 0:
+            raise ValueError("starvation_death_rate must be non-negative")
 
         self.initial_cells = min(float(initial_cells), float(space_limit))
         self.available_food = float(available_food)
@@ -53,6 +57,7 @@ class MicrobialGrowthHelloWorld(BioModule):
         self.space_limit = float(space_limit)
         self.integration_step = float(integration_step)
         self.food_per_new_cell = float(food_per_new_cell)
+        self.starvation_death_rate = float(starvation_death_rate)
 
         self._epsilon = 1e-9
         self._input_overrides: Dict[str, BioSignal] = {}
@@ -60,17 +65,24 @@ class MicrobialGrowthHelloWorld(BioModule):
         self._cells = self.initial_cells
         self._food = self.available_food
         self._last_growth = 0.0
+        self._last_death = 0.0
+        self._peak_cells = self.initial_cells
         self._history: List[Dict[str, float | str]] = []
         self._outputs: Dict[str, BioSignal] = {}
 
     def inputs(self) -> dict[str, SignalSpec]:
         return {
-            "initial_cells": self._scalar_input_spec("cells", "Starting number of cells."),
-            "available_food": self._scalar_input_spec("food_unit", "Food units available at the start."),
-            "growth_rate": self._scalar_input_spec(
-                "1/hour", "Maximum fractional growth rate when food and space are available."
+            "growth_setup": SignalSpec.record(
+                schema={
+                    "initial_cells": "float",
+                    "available_food": "float",
+                    "growth_rate": "float",
+                    "space_limit": "float",
+                    "food_per_new_cell": "float",
+                    "setup_label": "str",
+                },
+                description="Starting setup record from the starter-culture model.",
             ),
-            "space_limit": self._scalar_input_spec("cells", "Approximate maximum cell count the space can hold."),
         }
 
     def outputs(self) -> dict[str, SignalSpec]:
@@ -82,12 +94,14 @@ class MicrobialGrowthHelloWorld(BioModule):
                     "food_remaining": "float",
                     "food_used": "float",
                     "growth_this_step": "float",
+                    "death_this_step": "float",
+                    "peak_cells": "float",
                     "phase": "str",
                     "limiting_factor": "str",
                     "space_used_percent": "float",
                 },
                 emitted_unit="cells",
-                description="Current colony size, food level, and limiting factor.",
+                description="Current viable colony size, food level, starvation loss, and limiting factor.",
             ),
             "lesson_summary": SignalSpec.record(
                 schema={
@@ -132,6 +146,8 @@ class MicrobialGrowthHelloWorld(BioModule):
         self._cells = min(self.initial_cells, self.space_limit)
         self._food = self.available_food
         self._last_growth = 0.0
+        self._last_death = 0.0
+        self._peak_cells = self.initial_cells
         self._history = []
         self._outputs = {}
 
@@ -163,9 +179,9 @@ class MicrobialGrowthHelloWorld(BioModule):
         current = self._time
         while current < target - 1e-12:
             h = min(self.integration_step, target - current)
-            growth = self._step(h)
+            self._step(h)
             current += h
-            self._record_state(current, growth_this_step=growth)
+            self._record_state(current, growth_this_step=self._last_growth)
 
         self._time = current
         self._publish_outputs(self._time)
@@ -190,13 +206,13 @@ class MicrobialGrowthHelloWorld(BioModule):
         return [
             {
                 "render": "timeseries",
-                "description": "Cell count over time.",
+                "description": "Viable cell count over time.",
                 "data": {
-                    "title": "Colony Growth",
+                    "title": "Viable Colony Cells",
                     "x_unit": "hour",
                     "y_unit": "cells",
                     "series": [
-                        {"name": "Cells", "points": [[point["t"], point["cells"]] for point in self._history]},
+                        {"name": "Viable cells", "points": [[point["t"], point["cells"]] for point in self._history]},
                     ],
                 },
             },
@@ -223,7 +239,7 @@ class MicrobialGrowthHelloWorld(BioModule):
                     "columns": ["Question", "Answer"],
                     "rows": [
                         ["What changed?", self._headline()],
-                        ["Why did it slow down?", self._takeaway()],
+                        ["Why did it change?", self._takeaway()],
                         ["Main limit", self._limiting_factor()],
                         ["Food used", f"{self.available_food - self._food:.2f} food units"],
                         ["Space used", f"{self._space_used_percent():.1f}%"],
@@ -235,6 +251,13 @@ class MicrobialGrowthHelloWorld(BioModule):
     def _input_number(self, name: str) -> float | None:
         signal = self._input_overrides.get(name)
         if signal is None:
+            setup_signal = self._input_overrides.get("growth_setup")
+            setup_value = _signal_value(setup_signal) if setup_signal is not None else None
+            if isinstance(setup_value, dict) and name in setup_value:
+                try:
+                    return float(setup_value[name])
+                except (TypeError, ValueError):
+                    return None
             return None
         value = _signal_value(signal)
         if isinstance(value, dict):
@@ -270,8 +293,32 @@ class MicrobialGrowthHelloWorld(BioModule):
             if reset_initial_state:
                 self._food = available_food
 
+        food_per_new_cell = self._input_number("food_per_new_cell")
+        if food_per_new_cell is not None and food_per_new_cell > 0.0:
+            self.food_per_new_cell = food_per_new_cell
+
+        starvation_death_rate = self._input_number("starvation_death_rate")
+        if starvation_death_rate is not None and starvation_death_rate >= 0.0:
+            self.starvation_death_rate = starvation_death_rate
+
     def _step(self, h: float) -> float:
-        if self._cells <= self._epsilon or self._food <= self._epsilon or self.growth_rate <= self._epsilon:
+        self._last_growth = 0.0
+        self._last_death = 0.0
+
+        if self._cells <= self._epsilon:
+            self._last_growth = 0.0
+            return 0.0
+
+        if self._food <= self._epsilon:
+            if self.starvation_death_rate <= self._epsilon:
+                return 0.0
+            death = self._cells * (1.0 - math.exp(-self.starvation_death_rate * h))
+            death = min(self._cells, max(0.0, death))
+            self._cells = max(0.0, self._cells - death)
+            self._last_death = death
+            return -death
+
+        if self.growth_rate <= self._epsilon:
             self._last_growth = 0.0
             return 0.0
 
@@ -291,9 +338,11 @@ class MicrobialGrowthHelloWorld(BioModule):
         self._cells += growth
         self._food = max(0.0, self._food - growth * self.food_per_new_cell)
         self._last_growth = growth
+        self._peak_cells = max(self._peak_cells, self._cells)
         return growth
 
     def _record_state(self, t: float, *, growth_this_step: float) -> None:
+        self._peak_cells = max(self._peak_cells, self._cells)
         self._history.append(
             {
                 "t": float(t),
@@ -301,6 +350,8 @@ class MicrobialGrowthHelloWorld(BioModule):
                 "food_remaining": float(self._food),
                 "food_used": float(self.available_food - self._food),
                 "growth_this_step": float(growth_this_step),
+                "death_this_step": float(self._last_death),
+                "peak_cells": float(self._peak_cells),
                 "space_used_percent": float(self._space_used_percent()),
                 "phase": self._phase(),
                 "limiting_factor": self._limiting_factor(),
@@ -320,6 +371,8 @@ class MicrobialGrowthHelloWorld(BioModule):
                     "food_remaining": float(self._food),
                     "food_used": float(self.available_food - self._food),
                     "growth_this_step": float(self._last_growth),
+                    "death_this_step": float(self._last_death),
+                    "peak_cells": float(self._peak_cells),
                     "phase": self._phase(),
                     "limiting_factor": self._limiting_factor(),
                     "space_used_percent": float(self._space_used_percent()),
@@ -346,6 +399,10 @@ class MicrobialGrowthHelloWorld(BioModule):
         }
 
     def _phase(self) -> str:
+        if self._cells <= self._epsilon:
+            return "no viable cells"
+        if self._food <= self._epsilon and self._last_death > self._epsilon:
+            return "starvation decline"
         if self._food <= self._epsilon:
             return "out of food"
         if self._cells >= self.space_limit - self._epsilon:
@@ -359,6 +416,8 @@ class MicrobialGrowthHelloWorld(BioModule):
         return "growing"
 
     def _limiting_factor(self) -> str:
+        if self._food <= self._epsilon and self.starvation_death_rate > self._epsilon:
+            return "starvation"
         if self.growth_rate <= self._epsilon:
             return "growth rate is zero"
         if self._food <= self._epsilon:
@@ -377,12 +436,21 @@ class MicrobialGrowthHelloWorld(BioModule):
         return 100.0 * self._cells / max(self.space_limit, self._epsilon)
 
     def _headline(self) -> str:
+        if self._cells <= self._epsilon:
+            return "The viable colony died out."
+        if self._peak_cells > self._cells + self._epsilon and self._peak_cells > self.initial_cells + self._epsilon:
+            return (
+                f"The colony grew from {self.initial_cells:.1f} to a peak of {self._peak_cells:.1f} "
+                f"viable cells, then ended at {self._cells:.1f}."
+            )
         if self._cells <= self.initial_cells + self._epsilon:
-            return "The colony did not grow."
-        return f"The colony grew from {self.initial_cells:.1f} to {self._cells:.1f} cells."
+            return "The viable colony did not grow."
+        return f"The colony grew from {self.initial_cells:.1f} to {self._cells:.1f} viable cells."
 
     def _takeaway(self) -> str:
         limiting_factor = self._limiting_factor()
+        if limiting_factor == "starvation":
+            return "Cells multiplied until food ran out; after that, the viable population declined from starvation."
         if limiting_factor == "food":
             return "Cells multiplied until food became the main bottleneck."
         if limiting_factor == "space":
