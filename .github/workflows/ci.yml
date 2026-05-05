@@ -40,6 +40,8 @@ jobs:
         run: python3 scripts/validate_manifests.py
       - name: Check entrypoints
         run: python3 scripts/check_entrypoints.py
+      - name: Build and run package smoke
+        run: python3 scripts/validate_packages.py --run-smoke
       - name: Run tests
         run: python3 -m pytest -q labs/microbiology-hello-world-growth
       - name: Run example
