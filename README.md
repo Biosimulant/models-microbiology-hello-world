@@ -35,26 +35,6 @@ It demonstrates:
 
 For implementation details, see `docs/MULTI_MODEL_HELLO_WORLD.md`.
 
-## Quick Start
-
-Run the friendly local example:
-
-```bash
-python3 examples/run_example.py microbial-growth
-```
-
-Try a different scenario:
-
-```bash
-python3 examples/run_example.py microbial-growth --hours 10 --initial-cells 20 --food 120 --space-limit 250
-```
-
-Emit machine-readable output:
-
-```bash
-python3 examples/run_example.py microbial-growth --json
-```
-
 ## Model Story
 
 The simulation tracks a small colony:

@@ -62,32 +62,12 @@ The setup and story tables restate the starting plate, the main bottleneck, and 
 | `hello_world_story` | Plain-language story that combines setup and growth. |
 | `next_steps` | Simple ideas for changing the next run. |
 
-## Running with the Bundled Defaults
-
-```bash
-python3 examples/run_example.py microbial-growth
-```
-
-Try changing one knob:
-
-```bash
-python3 examples/run_example.py microbial-growth --hours 10 --initial-cells 20 --food 120 --space-limit 250
-```
-
-Reproduce the longer starvation screenshots:
-
-```bash
-python3 examples/run_example.py microbial-growth --hours 50
-```
-
-The example configuration lives at `examples/microbial-growth/config.yaml`.
-
 ## Running in Biosimulant Desktop
 
 Import the lab from the repository root:
 
 ```bash
-biosimulant labs import /Volumes/dem-ssd/imp/projects/Nitoons/Biosimulant/models/models-microbiology-hello-world/labs/microbiology-hello-world-growth
+biosimulant labs import labs/microbiology-hello-world-growth
 ```
 
 ## Notes
