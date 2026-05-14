@@ -8,21 +8,14 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-from biosim import BioModule
-from biosim.signals import AcceptedSignalProfile, BioSignal, RecordSignal, SignalSpec
+from biosim import StatefulBioModule
+from biosim.signals import BioSignal, SignalSpec, coerce_float, unwrap_payload
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from biosim.visuals import VisualSpec
 
 
-def _signal_value(signal: BioSignal) -> Any:
-    value = getattr(signal, "value", None)
-    if isinstance(value, dict) and set(value.keys()) == {"payload"}:
-        return value["payload"]
-    return value
-
-
-class MicrobialGrowthHelloWorld(BioModule):
+class MicrobialGrowthHelloWorld(StatefulBioModule):
     """Small colony model for explaining inputs, outputs, and visual summaries."""
 
     def __init__(
@@ -51,6 +44,7 @@ class MicrobialGrowthHelloWorld(BioModule):
         if starvation_death_rate < 0:
             raise ValueError("starvation_death_rate must be non-negative")
 
+        super().__init__(integration_step=integration_step, record_initial_state=True)
         self.initial_cells = min(float(initial_cells), float(space_limit))
         self.available_food = float(available_food)
         self.growth_rate = float(growth_rate)
@@ -60,15 +54,11 @@ class MicrobialGrowthHelloWorld(BioModule):
         self.starvation_death_rate = float(starvation_death_rate)
 
         self._epsilon = 1e-9
-        self._input_overrides: Dict[str, BioSignal] = {}
-        self._time = 0.0
         self._cells = self.initial_cells
         self._food = self.available_food
         self._last_growth = 0.0
         self._last_death = 0.0
         self._peak_cells = self.initial_cells
-        self._history: List[Dict[str, float | str]] = []
-        self._outputs: Dict[str, BioSignal] = {}
 
     def inputs(self) -> dict[str, SignalSpec]:
         return {
@@ -118,77 +108,25 @@ class MicrobialGrowthHelloWorld(BioModule):
             ),
         }
 
-    @staticmethod
-    def _scalar_input_spec(unit: str, description: str) -> SignalSpec:
-        return SignalSpec.scalar(
-            dtype="float64",
-            accepted_profiles=(
-                AcceptedSignalProfile(
-                    signal_type="scalar",
-                    dtype="float64",
-                    accepted_units=(unit,),
-                    description=description,
-                ),
-                AcceptedSignalProfile(signal_type="record", schema={"payload": "json"}, description=description),
-            ),
-            description=description,
-        )
-
     @property
     def history(self) -> list[dict[str, float | str]]:
         return [dict(point) for point in self._history]
 
-    def setup(self, config: Optional[dict[str, Any]] = None) -> None:
-        self.reset()
-
-    def reset(self) -> None:
-        self._time = 0.0
+    def reset_state(self) -> None:
         self._cells = min(self.initial_cells, self.space_limit)
         self._food = self.available_food
         self._last_growth = 0.0
         self._last_death = 0.0
         self._peak_cells = self.initial_cells
-        self._history = []
-        self._outputs = {}
 
-    def set_inputs(self, inputs: dict[str, BioSignal]) -> None:
-        self._input_overrides = dict(inputs or {})
-        self._apply_input_overrides(reset_initial_state=self._time <= 0.0 and not self._history)
+    def apply_overrides(self, *, reset_initial_state: bool) -> None:
+        self._apply_input_overrides(reset_initial_state=reset_initial_state)
 
-    def advance_window(
-        self,
-        start: float | None = None,
-        end: float | None = None,
-        inputs: dict[str, BioSignal] | None = None,
-    ) -> dict[str, BioSignal]:
-        if inputs:
-            self.set_inputs(inputs)
-        else:
-            self._apply_input_overrides(reset_initial_state=False)
+    def step(self, h: float) -> None:
+        self._step(h)
 
-        if not self._history:
-            self._record_state(0.0, growth_this_step=0.0)
-
-        if end is None:
-            end = self._time + float(getattr(self, "communication_step", self.integration_step) or self.integration_step)
-        target = float(end)
-        if target <= self._time:
-            self._publish_outputs(self._time)
-            return dict(self._outputs)
-
-        current = self._time
-        while current < target - 1e-12:
-            h = min(self.integration_step, target - current)
-            self._step(h)
-            current += h
-            self._record_state(current, growth_this_step=self._last_growth)
-
-        self._time = current
-        self._publish_outputs(self._time)
-        return dict(self._outputs)
-
-    def get_outputs(self) -> dict[str, BioSignal]:
-        return dict(self._outputs)
+    def record_state(self, t: float) -> None:
+        self._record_state(t, growth_this_step=self._last_growth)
 
     def get_state(self) -> dict[str, float | str]:
         return {
@@ -252,23 +190,14 @@ class MicrobialGrowthHelloWorld(BioModule):
         signal = self._input_overrides.get(name)
         if signal is None:
             setup_signal = self._input_overrides.get("growth_setup")
-            setup_value = _signal_value(setup_signal) if setup_signal is not None else None
+            setup_value = unwrap_payload(setup_signal) if setup_signal is not None else None
             if isinstance(setup_value, dict) and name in setup_value:
                 try:
                     return float(setup_value[name])
                 except (TypeError, ValueError):
                     return None
             return None
-        value = _signal_value(signal)
-        if isinstance(value, dict):
-            for key in ("value", "count", "payload"):
-                if key in value:
-                    value = value[key]
-                    break
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
+        return coerce_float(signal)
 
     def _apply_input_overrides(self, *, reset_initial_state: bool) -> None:
         growth_rate = self._input_number("growth_rate")
@@ -358,44 +287,36 @@ class MicrobialGrowthHelloWorld(BioModule):
             }
         )
 
-    def _publish_outputs(self, t: float) -> None:
-        source_name = getattr(self, "_world_name", self.__class__.__name__)
-        outputs = self.outputs()
-        self._outputs = {
-            "colony_state": RecordSignal(
-                source=source_name,
-                name="colony_state",
-                value={
-                    "t": float(t),
-                    "cells": float(self._cells),
-                    "food_remaining": float(self._food),
-                    "food_used": float(self.available_food - self._food),
-                    "growth_this_step": float(self._last_growth),
-                    "death_this_step": float(self._last_death),
-                    "peak_cells": float(self._peak_cells),
-                    "phase": self._phase(),
-                    "limiting_factor": self._limiting_factor(),
-                    "space_used_percent": float(self._space_used_percent()),
-                },
-                emitted_at=float(t),
-                spec=outputs["colony_state"],
-            ),
-            "lesson_summary": RecordSignal(
-                source=source_name,
-                name="lesson_summary",
-                value={
-                    "headline": self._headline(),
-                    "takeaway": self._takeaway(),
-                    "limiting_factor": self._limiting_factor(),
-                    "starting_cells": float(self.initial_cells),
-                    "final_cells": float(self._cells),
-                    "cell_change": float(self._cells - self.initial_cells),
-                    "food_used": float(self.available_food - self._food),
-                    "hours": float(t),
-                },
-                emitted_at=float(t),
-                spec=outputs["lesson_summary"],
-            ),
+    def output_payload(self, t: float) -> dict[str, Any]:
+        return {
+            "colony_state": self._colony_state_payload(t),
+            "lesson_summary": self._lesson_summary_payload(t),
+        }
+
+    def _colony_state_payload(self, t: float) -> dict[str, Any]:
+        return {
+            "t": float(t),
+            "cells": float(self._cells),
+            "food_remaining": float(self._food),
+            "food_used": float(self.available_food - self._food),
+            "growth_this_step": float(self._last_growth),
+            "death_this_step": float(self._last_death),
+            "peak_cells": float(self._peak_cells),
+            "phase": self._phase(),
+            "limiting_factor": self._limiting_factor(),
+            "space_used_percent": float(self._space_used_percent()),
+        }
+
+    def _lesson_summary_payload(self, t: float) -> dict[str, Any]:
+        return {
+            "headline": self._headline(),
+            "takeaway": self._takeaway(),
+            "limiting_factor": self._limiting_factor(),
+            "starting_cells": float(self.initial_cells),
+            "final_cells": float(self._cells),
+            "cell_change": float(self._cells - self.initial_cells),
+            "food_used": float(self.available_food - self._food),
+            "hours": float(t),
         }
 
     def _phase(self) -> str:

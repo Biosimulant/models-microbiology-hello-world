@@ -5,5 +5,7 @@
   "source": "local",
   "hub_id": "4c7ac16f-3c6a-44e7-9608-6a8d359e6dab",
   "created_at": "2026-05-03 10:41:53",
-  "package_name": "biosimulant/microbiology-hello-world-growth"
+  "last_synced_at": "2026-05-14T19:37:09.884694+00:00",
+  "hub_manifest_hash": "1e93ad8a1977d28f05a7c099f53fb835010285835ef46124c8e2616d80b73b0e",
+  "package_name": "microbiology-hello-world-growth"
 }

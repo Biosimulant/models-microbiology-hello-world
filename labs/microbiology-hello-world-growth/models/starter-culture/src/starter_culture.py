@@ -7,21 +7,14 @@ from __future__ import annotations
 
 from typing import Any, Optional, TYPE_CHECKING
 
-from biosim import BioModule
-from biosim.signals import AcceptedSignalProfile, BioSignal, RecordSignal, SignalSpec
+from biosim import SignalEmitterBioModule
+from biosim.signals import BioSignal, SignalSpec, coerce_float, scalar_or_record_input
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from biosim.visuals import VisualSpec
 
 
-def _signal_value(signal: BioSignal) -> Any:
-    value = getattr(signal, "value", None)
-    if isinstance(value, dict) and set(value.keys()) == {"payload"}:
-        return value["payload"]
-    return value
-
-
-class StarterCultureSetup(BioModule):
+class StarterCultureSetup(SignalEmitterBioModule):
     """Turn simple user controls into a structured growth setup record."""
 
     def __init__(
@@ -32,6 +25,7 @@ class StarterCultureSetup(BioModule):
         space_limit: float = 200.0,
         integration_step: float = 0.25,
     ) -> None:
+        super().__init__()
         for name, value in {
             "initial_cells": initial_cells,
             "available_food": available_food,
@@ -50,16 +44,15 @@ class StarterCultureSetup(BioModule):
         self.space_limit = float(space_limit)
         self.integration_step = float(integration_step)
         self._inputs: dict[str, BioSignal] = {}
-        self._outputs: dict[str, RecordSignal] = {}
         self._setup: dict[str, Any] = {}
         self._time = 0.0
 
     def inputs(self) -> dict[str, SignalSpec]:
         return {
-            "initial_cells": self._scalar_input_spec("cells", "Starting number of cells."),
-            "available_food": self._scalar_input_spec("food_unit", "Food units available at the start."),
-            "growth_rate": self._scalar_input_spec("1/hour", "How quickly cells can multiply."),
-            "space_limit": self._scalar_input_spec("cells", "Approximate maximum colony size."),
+            "initial_cells": scalar_or_record_input("cells", "Starting number of cells."),
+            "available_food": scalar_or_record_input("food_unit", "Food units available at the start."),
+            "growth_rate": scalar_or_record_input("1/hour", "How quickly cells can multiply."),
+            "space_limit": scalar_or_record_input("cells", "Approximate maximum colony size."),
         }
 
     def outputs(self) -> dict[str, SignalSpec]:
@@ -91,28 +84,12 @@ class StarterCultureSetup(BioModule):
             ),
         }
 
-    @staticmethod
-    def _scalar_input_spec(unit: str, description: str) -> SignalSpec:
-        return SignalSpec.scalar(
-            dtype="float64",
-            accepted_profiles=(
-                AcceptedSignalProfile(
-                    signal_type="scalar",
-                    dtype="float64",
-                    accepted_units=(unit,),
-                    description=description,
-                ),
-                AcceptedSignalProfile(signal_type="record", schema={"payload": "json"}, description=description),
-            ),
-            description=description,
-        )
-
     def setup(self, config: Optional[dict[str, Any]] = None) -> None:
         self._publish(0.0)
 
     def reset(self) -> None:
         self._inputs = {}
-        self._outputs = {}
+        self.clear_outputs()
         self._setup = {}
         self._time = 0.0
 
@@ -124,15 +101,15 @@ class StarterCultureSetup(BioModule):
         start: float | None = None,
         end: float | None = None,
         inputs: dict[str, BioSignal] | None = None,
-    ) -> dict[str, RecordSignal]:
+    ) -> dict[str, BioSignal]:
         if inputs:
             self.set_inputs(inputs)
         self._time = float(end if end is not None else self._time + self.integration_step)
         self._publish(self._time)
-        return dict(self._outputs)
+        return self.get_outputs()
 
-    def get_outputs(self) -> dict[str, RecordSignal]:
-        return dict(self._outputs)
+    def source_name(self) -> str:
+        return str(getattr(self, "_world_name", "starter_setup"))
 
     def visualize(self) -> Optional["VisualSpec" | list["VisualSpec"]]:
         if not self._setup:
@@ -156,15 +133,8 @@ class StarterCultureSetup(BioModule):
         signal = self._inputs.get(name)
         if signal is None:
             return default
-        value = _signal_value(signal)
-        if isinstance(value, dict):
-            for key in ("value", "count", "payload"):
-                if key in value:
-                    value = value[key]
-                    break
-        try:
-            number = float(value)
-        except (TypeError, ValueError):
+        number = coerce_float(signal)
+        if number is None:
             return default
         return number if number >= 0.0 else default
 
@@ -198,28 +168,11 @@ class StarterCultureSetup(BioModule):
             "space_limit": self._setup["space_limit"],
         }
         metadata = {"status": "ok", "message": "Prepared the starter culture setup."}
-        source_name = getattr(self, "_world_name", "starter_setup")
-        specs = self.outputs()
-        self._outputs = {
-            "growth_setup": RecordSignal(
-                source=source_name,
-                name="growth_setup",
-                value=dict(self._setup),
-                emitted_at=emitted_at,
-                spec=specs["growth_setup"],
-            ),
-            "setup_summary": RecordSignal(
-                source=source_name,
-                name="setup_summary",
-                value=summary,
-                emitted_at=emitted_at,
-                spec=specs["setup_summary"],
-            ),
-            "run_metadata": RecordSignal(
-                source=source_name,
-                name="run_metadata",
-                value=metadata,
-                emitted_at=emitted_at,
-                spec=specs["run_metadata"],
-            ),
-        }
+        self.publish_outputs(
+            emitted_at,
+            {
+                "growth_setup": dict(self._setup),
+                "setup_summary": summary,
+                "run_metadata": metadata,
+            },
+        )

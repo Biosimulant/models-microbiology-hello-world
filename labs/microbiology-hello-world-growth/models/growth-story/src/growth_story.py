@@ -10,18 +10,11 @@ from typing import Any, Optional, TYPE_CHECKING
 
 from biosim import BioModule
 from biosim.signals import BioSignal, RecordSignal, SignalSpec
+from biosim.signals import unwrap_payload as _signal_value
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from biosim.visuals import VisualSpec
 
-
-def _signal_value(signal: BioSignal | None) -> Any:
-    if signal is None:
-        return None
-    value = getattr(signal, "value", None)
-    if isinstance(value, dict) and set(value.keys()) == {"payload"}:
-        return value["payload"]
-    return value
 
 
 def _record_spec(schema: dict[str, str], description: str) -> SignalSpec:
