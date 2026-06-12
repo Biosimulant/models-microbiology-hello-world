@@ -46,6 +46,8 @@ runtime:
   duration: 12
   initial_inputs: {}
 schema_version: '2.0'
+package: microbiology-hello-world-growth
+version: 1.0.1
 title: Microbiology Hello World Growth Lab
 wiring:
 - from: starter_setup.growth_setup
