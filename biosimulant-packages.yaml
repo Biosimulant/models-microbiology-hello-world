@@ -4,7 +4,7 @@ default_visibility: public
 packages:
   - id: microbiology-hello-world-growth-lab
     package: microbiology-hello-world-growth
-    version: 1.0.1
+    version: 1.0.2
     type: lab
     path: labs/microbiology-hello-world-growth
     visibility: public
